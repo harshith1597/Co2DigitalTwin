@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CO₂ Emission Digital Twin — India</title>
+
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.119/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --border:#334155; --muted:#94a3b8;
+    --text:#f1f5f9; --green:#10b981; --yellow:#f59e0b; --red:#f43f5e; --blue:#2563eb;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);
+    font-family:'Segoe UI',system-ui,sans-serif;color:var(--text);overflow:hidden}
+  #cesiumContainer{position:absolute;inset:0}
+  .cesium-widget-credits{display:none!important}
+
+  /* header */
+  .topbar{position:absolute;top:0;left:0;right:0;z-index:10;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 18px;background:rgba(15,23,42,.82);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--border)}
+  .topbar .title{font-size:17px;font-weight:700}
+  .topbar .sub{font-size:11px;color:#64748b;margin-left:10px}
+  .live{font-size:11px;font-weight:600;color:var(--green);
+    background:#064e3b;padding:4px 12px;border-radius:20px}
+
+  /* panels */
+  .panel{position:absolute;z-index:10;background:rgba(30,41,59,.92);
+    backdrop-filter:blur(8px);border:1px solid var(--border);
+    border-radius:14px;padding:16px 18px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  .control{top:70px;left:18px;width:270px}
+  .output{top:70px;right:18px;width:240px}
+  .section-title{font-size:10px;font-weight:700;color:#64748b;
+    text-transform:uppercase;letter-spacing:.1em;margin:0 0 10px;
+    display:flex;align-items:center;gap:6px}
+
+  label.fld{display:block;font-size:12px;color:#cbd5e1;margin:14px 0 6px}
+  label.fld:first-of-type{margin-top:0}
+  .fld .val{float:right;font-weight:700;color:#fff}
+  select{width:100%;padding:9px 10px;border-radius:8px;background:#0f172a;
+    color:#fff;border:1px solid var(--border);font-size:13px}
+  input[type=range]{width:100%;accent-color:var(--blue);cursor:pointer}
+
+  .bignum{font-size:34px;font-weight:800;line-height:1;margin:4px 0 2px;text-align:center}
+  .unit{font-size:11px;color:var(--muted);text-align:center;
+    text-transform:uppercase;letter-spacing:.08em}
+  .pill{display:block;width:fit-content;margin:8px auto 0;padding:4px 16px;
+    border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.06em}
+  .pill.LOW{background:#064e3b;color:var(--green)}
+  .pill.MEDIUM{background:#451a03;color:var(--yellow)}
+  .pill.HIGH{background:#4c0519;color:var(--red)}
+
+  .mini{display:flex;gap:8px;margin-top:12px}
+  .card{flex:1;background:#0f172a;border:1px solid var(--border);
+    border-radius:10px;padding:8px;text-align:center}
+  .card .k{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .card .v{font-size:17px;font-weight:700;margin-top:2px}
+
+  .mixbar{height:8px;border-radius:5px;overflow:hidden;display:flex;margin-top:12px;background:#0f172a}
+  .mixrow{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:5px}
+
+  /* legend */
+  .legend{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);
+    z-index:10;display:flex;gap:22px;background:rgba(30,41,59,.92);
+    backdrop-filter:blur(8px);border:1px solid var(--border);
+    border-radius:30px;padding:8px 22px;font-size:11px}
+  .legend span{display:flex;align-items:center;gap:6px;color:#cbd5e1}
+  .dot{width:10px;height:10px;border-radius:50%}
+
+  .loader{position:absolute;inset:0;z-index:50;display:flex;align-items:center;
+    justify-content:center;background:var(--bg);font-size:14px;color:var(--muted)}
+  .hint{position:absolute;bottom:18px;right:18px;z-index:10;font-size:10px;
+    color:#64748b;background:rgba(15,23,42,.7);padding:5px 10px;border-radius:8px}
+</style>
+</head>
+<body>
+
+<div id="cesiumContainer"></div>
+
+<div class="topbar">
+  <div>
+    <span class="title">🌍 CO₂ Emission Digital Twin — India</span>
+    <span class="sub">Region-Level Forecasting · CatBoost Model · R² = 0.9973</span>
+  </div>
+  <span class="live">● LIVE 3D</span>
+</div>
+
+<!-- CONTROL PANEL -->
+<div class="panel control">
+  <p class="section-title">🎛️ Control Panel</p>
+
+  <label class="fld">Select State</label>
+  <select id="stateSel"></select>
+
+  <label class="fld">Renewable Energy % <span class="val" id="reVal">—</span></label>
+  <input type="range" id="reSlider" min="1" max="80" value="20" />
+
+  <label class="fld">Energy Use (TWh) <span class="val" id="enVal">—</span></label>
+  <input type="range" id="enSlider" min="20" max="500" step="5" value="100" />
+
+  <label class="fld">Forecast Year <span class="val" id="yrVal">2024</span></label>
+  <input type="range" id="yrSlider" min="2024" max="2035" value="2024" />
+</div>
+
+<!-- PREDICTION OUTPUT -->
+<div class="panel output">
+  <p class="section-title">📊 Prediction Output</p>
+  <div class="unit">Predicted CO₂ Emissions</div>
+  <div class="bignum" id="co2Num">—</div>
+  <div class="unit">MtCO₂</div>
+  <div class="pill MEDIUM" id="statusPill">—</div>
+
+  <div class="mini">
+    <div class="card">
+      <div class="k">Change</div>
+      <div class="v" id="chgVal">—</div>
+    </div>
+    <div class="card">
+      <div class="k">RE Share</div>
+      <div class="v" id="reShare" style="color:var(--blue)">—</div>
+    </div>
+  </div>
+
+  <div class="mixrow"><span id="reLbl">🟢 RE —</span><span id="nreLbl">🔴 Non-RE —</span></div>
+  <div class="mixbar">
+    <div id="reBar" style="background:var(--green);width:20%"></div>
+    <div style="flex:1;background:var(--red)"></div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i class="dot" style="background:var(--green)"></i> LOW &lt; 100 MtCO₂</span>
+  <span><i class="dot" style="background:var(--yellow)"></i> MEDIUM 100–200 MtCO₂</span>
+  <span><i class="dot" style="background:var(--red)"></i> HIGH &gt; 200 MtCO₂</span>
+</div>
+
+<div class="hint">Tip: click any state on the map to select it</div>
+
+<div class="loader" id="loader">Loading India map &amp; data…</div>
+
+<script>
+// ───────────────────────────────────────────────────────────────────────────
+//  CONFIG
+// ───────────────────────────────────────────────────────────────────────────
+Cesium.Ion.defaultAccessToken =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJjZDAxNzRmZi05ODM2LTQyNTYtYTVlNi1iNzE0MWFhYzg3NWMiLCJpZCI6NDM5MDUyLCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3ODAzMjcyMzl9.72GGpsKxDKWr3SGorFD4_HfwQYuxxyhv1cek2_zjPG4";
+
+// dataset-name  ->  geojson NAME_1   (the only two that differ)
+const TO_GEO = { "Odisha": "Orissa", "Uttarakhand": "Uttaranchal" };
+// reverse: geojson NAME_1 -> dataset name
+const FROM_GEO = { "Orissa": "Odisha", "Uttaranchal": "Uttarakhand" };
+
+// CO₂ colour thresholds (MtCO₂)
+function level(co2){
+  if (co2 < 100) return { key:"LOW",    css:"#10b981" };
+  if (co2 < 200) return { key:"MEDIUM", css:"#f59e0b" };
+  return            { key:"HIGH",   css:"#f43f5e" };
+}
+const NO_DATA = "#475569"; // grey for regions with no data (UTs etc.)
+
+// ───────────────────────────────────────────────────────────────────────────
+//  VIEWER
+// ───────────────────────────────────────────────────────────────────────────
+const viewer = new Cesium.Viewer("cesiumContainer", {
+  terrain: Cesium.Terrain.fromWorldTerrain(),
+  animation:false, timeline:false, baseLayerPicker:false, geocoder:false,
+  homeButton:false, sceneModePicker:false, navigationHelpButton:false,
+  fullscreenButton:false, infoBox:false, selectionIndicator:false
+});
+viewer.scene.globe.depthTestAgainstTerrain = true;
+viewer.scene.skyAtmosphere.show = true;
+
+// frame India with a slight tilt for the 3-D feel
+viewer.camera.setView({
+  destination: Cesium.Cartesian3.fromDegrees(81.5, 9.0, 3150000),
+  orientation: { heading: 0, pitch: Cesium.Math.toRadians(-58), roll: 0 }
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+//  STATE
+// ───────────────────────────────────────────────────────────────────────────
+let BASE = {};            // dataset name -> { co2, energy, reFrac, gdp, urban }
+let ENTITIES = {};        // dataset name -> [entity, entity, ...]
+let selected = null;      // current dataset state name
+
+// physics-style approximation of the model: CO₂ tracks non-renewable energy.
+// At a state's own baseline values this returns exactly its real 2024 CO₂.
+function predict(name, reFrac, energy, year){
+  const b = BASE[name];
+  if (!b) return 0;
+  const grown   = energy * Math.pow(1.015, year - 2024);   // mild demand growth
+  const nreNew  = grown   * (1 - reFrac);
+  const nreBase = b.energy * (1 - b.reFrac);
+  const co2 = nreBase > 0 ? b.co2 * (nreNew / nreBase) : 0;
+  return Math.max(co2, 0);
+}
+
+// paint one state with a colour (updates every polygon part it owns)
+function paint(name, css, selectedState){
+  const ents = ENTITIES[name];
+  if (!ents) return;
+  ents.forEach(e => {
+    e.polygon.material   = Cesium.Color.fromCssColorString(css).withAlpha(selectedState ? 0.92 : 0.62);
+    e.polyline.material  = selectedState ? Cesium.Color.WHITE
+                                         : Cesium.Color.fromCssColorString("#0b1220").withAlpha(0.55);
+    e.polyline.width     = selectedState ? 3.5 : 1.0;
+  });
+}
+
+// colour the whole map: everyone at baseline, selected gets its live prediction
+function repaintAll(liveCo2){
+  Object.keys(ENTITIES).forEach(name => {
+    if (name === selected) return;
+    const b = BASE[name];
+    if (b) paint(name, level(b.co2).css, false);
+    else   paint(name, NO_DATA, false);
+  });
+  if (selected) paint(selected, level(liveCo2).css, true);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  UI WIRING
+// ───────────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function refresh(){
+  const reFrac = (+$("reSlider").value) / 100;
+  const energy = +$("enSlider").value;
+  const year   = +$("yrSlider").value;
+
+  const co2  = predict(selected, reFrac, energy, year);
+  const base = BASE[selected].co2;
+  const chg  = base > 0 ? ((co2 - base) / base) * 100 : 0;
+  const lv   = level(co2);
+  const rePct = Math.round(reFrac * 100);
+
+  $("reVal").textContent = rePct + "%";
+  $("enVal").textContent = energy;
+  $("yrVal").textContent = year;
+
+  $("co2Num").textContent = co2.toFixed(1);
+  $("co2Num").style.color = lv.css;
+  $("statusPill").textContent = lv.key + " EMISSIONS";
+  $("statusPill").className = "pill " + lv.key;
+
+  const down = chg <= 0;
+  $("chgVal").innerHTML = (down ? "▼ " : "▲ ") + Math.abs(chg).toFixed(1) + "%";
+  $("chgVal").style.color = down ? "var(--green)" : "var(--red)";
+  $("reShare").textContent = rePct + "%";
+
+  $("reLbl").textContent  = "🟢 RE " + rePct + "%";
+  $("nreLbl").textContent = "🔴 Non-RE " + (100 - rePct) + "%";
+  $("reBar").style.width  = rePct + "%";
+
+  repaintAll(co2);
+}
+
+function selectState(name, flyTo){
+  selected = name;
+  $("stateSel").value = name;
+  const b = BASE[name];
+  $("reSlider").value = Math.round(b.reFrac * 100);
+  $("enSlider").value = Math.round(b.energy);
+  $("yrSlider").value = 2024;
+  refresh();
+
+  if (flyTo){
+    const ents = ENTITIES[name];
+    if (ents && ents.length){
+      viewer.flyTo(ents, {
+        duration: 1.0,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-55), 0)
+      });
+    }
+  }
+}
+
+$("stateSel").addEventListener("change", e => selectState(e.target.value, true));
+["reSlider","enSlider","yrSlider"].forEach(id =>
+  $(id).addEventListener("input", refresh)
+);
+
+// click a state on the globe to select it
+const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+handler.setInputAction(click => {
+  const picked = viewer.scene.pick(click.position);
+  if (picked && picked.id && picked.id.dsName && BASE[picked.id.dsName]){
+    selectState(picked.id.dsName, true);
+  }
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+// ───────────────────────────────────────────────────────────────────────────
+//  LOAD DATA + GEOJSON, THEN BUILD THE MAP
+// ───────────────────────────────────────────────────────────────────────────
+async function boot(){
+  // 1. load the real dataset (latest year per state)
+  const csvText = await (await fetch("data/master_dataset_final.csv")).text();
+  const rows = Papa.parse(csvText, { header:true, dynamicTyping:true, skipEmptyLines:true }).data;
+
+  const latest = {};            // state -> row with max year
+  rows.forEach(r => {
+    const s = r.State; if (!s) return;
+    if (!latest[s] || r.Year > latest[s].Year) latest[s] = r;
+  });
+  Object.values(latest).forEach(r => {
+    BASE[r.State] = {
+      co2:    +r.Carbon_Emissions_MtCO2 || 0,
+      energy: +r.Energy_Use_TWh        || 1,
+      reFrac: +r.RE_Fraction           || 0,
+      gdp:    +r.GDP_BillionINR        || 0,
+      urban:  +r.Urbanization_Percent  || 0
+    };
+  });
+
+  // populate dropdown (sorted dataset states)
+  const names = Object.keys(BASE).sort();
+  const sel = $("stateSel");
+  names.forEach(n => {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n; sel.appendChild(o);
+  });
+
+  // 2. load the real state boundaries and build flat coloured regions
+  const gj = await (await fetch("data/india_states.geojson")).json();
+
+  gj.features.forEach(f => {
+    const geoName = f.properties.NAME_1;
+    const dsName  = FROM_GEO[geoName] || geoName;   // map to dataset name
+    const hasData = !!BASE[dsName];
+    const baseCss = hasData ? level(BASE[dsName].co2).css : NO_DATA;
+
+    const polys = f.geometry.type === "Polygon"
+        ? [f.geometry.coordinates]
+        : f.geometry.coordinates;                   // MultiPolygon
+
+    polys.forEach(poly => {
+      const ring = poly[0];                         // outer ring [[lon,lat],...]
+      const flat = [];
+      ring.forEach(c => { flat.push(c[0], c[1]); });
+      const positions = Cesium.Cartesian3.fromDegreesArray(flat);
+
+      const ent = viewer.entities.add({
+        name: dsName,
+        polygon: {                                  // NO height -> clamps flat to ground
+          hierarchy: new Cesium.PolygonHierarchy(positions),
+          material:  Cesium.Color.fromCssColorString(baseCss).withAlpha(0.62)
+        },
+        polyline: {                                 // state border, draped on terrain
+          positions: positions,
+          clampToGround: true,
+          width: 1.0,
+          material: Cesium.Color.fromCssColorString("#0b1220").withAlpha(0.55)
+        }
+      });
+      ent.dsName = dsName;                           // for click-picking
+      (ENTITIES[dsName] = ENTITIES[dsName] || []).push(ent);
+    });
+  });
+
+  // 3. select a starting state
+  const start = BASE["Maharashtra"] ? "Maharashtra" : names[0];
+  selectState(start, false);
+
+  $("loader").style.display = "none";
+}
+
+boot().catch(err => {
+  $("loader").textContent = "Load error: " + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>
